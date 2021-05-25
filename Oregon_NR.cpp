@@ -39,8 +39,18 @@
 // ВОЗНИКШИМ ИЗ-ЗА ИСПОЛЬЗОВАНИЯ ПРОГРАММНОГО ОБЕСПЕЧЕНИЯ ИЛИ ИНЫХ ДЕЙСТВИЙ С ПРОГРАММНЫМ ОБЕСПЕЧЕНИЕМ.
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+/*
+  yield() - will only allow the Espressif NONOS SDK to run.
+  Arduion ESP8266 core does not get to run.
 
-//Всё, что относится к прерыванию/////////////////////////////////////
+  delay(0) - both the Espressif NONOS SDK and the Arduino ESP8266 core get to
+  run.
+*/
+// static __always_inline void YIELD() { delay(0); }
+static __always_inline void YIELD() { yield(); }
+
+
+// Everything related to interruption /////////////////////////////////////
 #ifndef Oregon_NR_int
 #define Oregon_NR_int
 static volatile unsigned long pm;
@@ -55,17 +65,17 @@ void receiver_interruption(void) {
 #endif
 
   if (digitalRead(RECEIVER_PIN)) {
-    //Начало импульса
+    // Impulse start
     pl = 0;
     pm = micros();
   }
   else {
-    //Конец импульса
-    //Вычисляется время окончания и длина
+    // End of impulse
+    // End time and length are calculated
     pl = micros() - pm;
     //pm += pl;
   }
-  //yield();
+  // YIELD(); // cannot have this in an ISR
 }
 #endif
 
@@ -74,7 +84,7 @@ Oregon_NR::Oregon_NR(byte MHZ, byte MHZ_INT)
 {
   INT_NO = MHZ_INT;
   RECEIVER_PIN = MHZ;
-  pinMode(MHZ, INPUT); // Вывод, на который подключён приёмник
+  pinMode(MHZ, INPUT); // The output to which the receiver is connected
   packet = new byte[packet_length];
   valid_p = new byte[packet_length];
   decode_tacts = new byte[no_read_tacts];
@@ -88,8 +98,8 @@ Oregon_NR::Oregon_NR(byte MHZ, byte MHZ_INT, byte led, bool pull_up)
   LED = led;
   PULL_UP = pull_up;
   RECEIVER_PIN = MHZ;
-  pinMode(MHZ, INPUT);    // Вывод, на который подключён приёмник
-  pinMode(LED, OUTPUT);   // Вывод светодиода
+  pinMode(MHZ, INPUT);    // GPIO pin connected to Receiver Data pin
+  pinMode(LED, OUTPUT);   // GPIO pin connected to LED
   packet = new byte[packet_length];
   valid_p = new byte[packet_length];
   decode_tacts = new byte[no_read_tacts];
@@ -164,12 +174,12 @@ void Oregon_NR::capture(bool DEBUG_INFO)
   ////////////////////////////////////////////////////////
   // An impulse has arrived
   if (pulse_length != 0 && receive_status == FIND_PACKET) {
-    //Если импульс пришёл слишком поздно для конкретной версии протокола, то это первый импульс
+    // If the impulse came too late for a specific protocol version, then this is the first impulse.
     if ((pulse_marker - pre_marker) > (PER_LENGTH2 * 2 + LENGTH_TOLERANCE) && ver == 2) start_pulse_cnt = 0;
     if ((pulse_marker - pre_marker) > (PER_LENGTH3 * 2 + LENGTH_TOLERANCE) && ver == 3) start_pulse_cnt = 0;
 
 
-    // If an impulse came too late for a specific protocol version, then this is the first impulse
+    // The first "correct" pulse is found - we determine the type of protocol
     if (start_pulse_cnt == 0) {
 
       if (pulse_length < (MAX_LENGTH2 + LENGTH_TOLERANCE) && pulse_length > (MIN_LENGTH2 -  LENGTH_TOLERANCE) && catch2 ) {
@@ -486,27 +496,29 @@ void Oregon_NR::capture(bool DEBUG_INFO)
     // Check if splicing did anything - disabled. It only gives you a flag, but it takes a long time.
     //////////////////////////////////////////////
 
-    //if (get_data(halfshift, ver, result_data) > data_val && get_data(halfshift, ver, result_data) > data_val2 && ver == 2)
+    // if (get_data(halfshift, ver, result_data) > data_val && get_data(halfshift, ver, result_data) > data_val2 && ver == 2)
     if (packet_number == 2)
 
       //////////////////////////////////////////////
       // Extract the bits from the clock sequence
       sens_type = 0;
-    if (result_data && get_info_data(result_data, packet, valid_p))
+    if (result_data)
     {
-      sens_type = get_sensor(packet);  // Determine the type of package by the type of sensor
-      restore_data(packet, sens_type); // Recover data by sensor type
-      crc_c = check_CRC(packet, sens_type); // Check CRC, if it is true, then make all doubtful bits confident
-      // If not all bytes are determined with certainty, it cannot be assumed that the packet is correct
-      // The packet is captured only if the start sequence is found (sync nibl)
-      // If there were no synchromes, then there is nothing to talk about at all
-      if ( synchro_pos != 255 && packet_number == 1)  captured = 1;
-      if ( (synchro_pos2 != 255 || synchro_pos2 != 255) && packet_number == 2)  captured = 1;
-      // Capturing a piece of the parcel is not counted
-      if ((ver == 2 && read_tacts < 136) || (ver == 3 && read_tacts < 80))   captured = 0;
+      if (get_info_data(result_data, packet, valid_p))
+      {
+        sens_type = get_sensor(packet);  // Determine the type of package by the type of sensor
+        restore_data(packet, sens_type); // Recover data by sensor type
+        crc_c = check_CRC(packet, sens_type); // Check CRC, if it is true, then make all doubtful bits confident
+        // If not all bytes are determined with certainty, it cannot be assumed that the packet is correct
+        // The packet is captured only if the start sequence is found (sync nibl)
+        // If there were no synchromes, then there is nothing to talk about at all
+        if ( synchro_pos != 255 && packet_number == 1)  captured = 1;
+        if ( (synchro_pos2 != 255 || synchro_pos2 != 255) && packet_number == 2)  captured = 1;
+        // Capturing a piece of the parcel is not counted
+        if ((ver == 2 && read_tacts < 136) || (ver == 3 && read_tacts < 80))   captured = 0;
+      }
     }
-
-    if (!result_data) // state was not properlu defined
+    else
     {
       captured = 0; // Added 05/24/21 - mjh
     }
@@ -538,7 +550,7 @@ void Oregon_NR::capture(bool DEBUG_INFO)
     sens_wdir = 0;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    //Расшифровка датчиков Орегон
+    // Decoding Oregon sensors - Расшифровка датчиков Орегон
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     if ((sens_type == THGN132           ||
          sens_type == THN132            ||
@@ -595,6 +607,7 @@ void Oregon_NR::capture(bool DEBUG_INFO)
     if (sens_type == PCR800 && crc_c) {
       sens_id = get_id(packet);
       sens_battery = get_battery(packet);
+      // The rest of the parameters are retrieved directly from the package
       // Остальные параметры извлекаюся непосредственно из пакета
     }
 
@@ -603,7 +616,7 @@ void Oregon_NR::capture(bool DEBUG_INFO)
 
 #if ADD_SENS_SUPPORT == 1
     //////////////////////////////////////////////////////////////////////////////////////////////////
-    //Расшифровка комплексных газовых датчиков
+    // Decoding complex gas sensors - Расшифровка комплексных газовых датчиков
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     if ((sens_type & 0xFF00) == GAS && crc_c) {
       sens_id = 0;
@@ -618,7 +631,7 @@ void Oregon_NR::capture(bool DEBUG_INFO)
       sens_CH = get_gas_CH(packet);
     }
     //////////////////////////////////////////////////////////////////////////////////////////////////
-    //Расшифровка датчиков пожарной сигнализации
+    // Decoding of fire alarm sensors - Расшифровка датчиков пожарной сигнализации
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     if ((sens_type & 0xFF00) == FIRE && crc_c) {
       sens_id = 0;
@@ -630,7 +643,7 @@ void Oregon_NR::capture(bool DEBUG_INFO)
       sens_lockalarm = get_fire_lockalarm(packet);
     }
     //////////////////////////////////////////////////////////////////////////////////////////////////
-    //Расшифровка датчиков THP
+    // Decoding of THP sensors - Расшифровка датчиков THP
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     if ((sens_type & 0xFF00) == THP && crc_c) {
       sens_chnl = get_gas_channel(packet);
@@ -641,7 +654,7 @@ void Oregon_NR::capture(bool DEBUG_INFO)
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////
-    //Расшифровка датчиков тока и напряжения
+    // Decoding current and voltage sensors - Расшифровка датчиков тока и напряжения
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     if ((sens_type & 0xFF00) == CURRENT && crc_c) {
       sens_id = 0;
@@ -654,7 +667,7 @@ void Oregon_NR::capture(bool DEBUG_INFO)
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////
-    //Расшифровка датчиков осадков емкостного типа
+    // Decoding of capacitive precipitation sensors - Расшифровка датчиков осадков емкостного типа
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     if ((sens_type & 0xFF00) == CAPRAIN && crc_c) {
       sens_id = 0;
@@ -690,7 +703,7 @@ void Oregon_NR::capture(bool DEBUG_INFO)
 void Oregon_NR::get_tacts(byte* cdptr, int bitsize) {
 
   // Reset arrays
-  for (int bt = 0 ; bt < bitsize; bt++) decode_tacts[bt] = 2;     //Изначально такт неизвестен
+  for (int bt = 0 ; bt < bitsize; bt++) decode_tacts[bt] = 2;     // Initially, the clock is unknown - Изначально такт неизвестен
 
   // Decoding the bars
   byte* cdp = cdptr;
@@ -949,7 +962,7 @@ int Oregon_NR::get_data(int btt, byte p_ver, byte* cdptr) {
       if (*cdp > (129)) packet_validity += *cdp - 128;
       if (*cdp < (127)) packet_validity += 128 - *cdp;
       cdp++;
-      yield();
+      YIELD();
     }
     return packet_validity; // return the number of valid bytes
   }
@@ -1027,7 +1040,7 @@ int Oregon_NR::get_data(int btt, byte p_ver, byte* cdptr) {
       if (*cdp > (129))  packet_validity += *cdp - 128;
       if (*cdp < (127)) packet_validity += 128 - *cdp;
       cdp++;
-      yield();
+      YIELD();
     }
     return packet_validity; // return the number of valid bytes
   }
@@ -1092,7 +1105,7 @@ int Oregon_NR::collect(byte* cdptr) {
       bt2 = 0;
     }
    // Do not give up the processor while collecting data !!!
-    // yield();
+    // YIELD();
     /////////////////////////////////////////////
     // There is a time until the next half-cycle arrives
     // You can check if the package is over
@@ -1124,7 +1137,7 @@ int Oregon_NR::collect(byte* cdptr) {
 
     while (micros() < pre_marker);
   }
-  yield();
+  YIELD();
   return bt;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1153,7 +1166,7 @@ int Oregon_NR::correlate_data(byte* ser1, byte* ser2) {
       s2++;
       s1++;
     }
-    yield();
+    YIELD();
     s2t++;
   }
   for (int i = 0; i < no_read_bits; i++) {
@@ -1177,7 +1190,7 @@ int Oregon_NR::correlate_data(byte* ser1, byte* ser2) {
       s2++;
       s1++;
     }
-    yield();
+    YIELD();
     s1t++;
   }
   // Ищем наилучшее совпадение для обоих вариантов
@@ -1263,16 +1276,23 @@ int Oregon_NR::get_synchro_pos(byte* code) {
   return (byte) i;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-//Создаёт кодовую посылку
-//code - указатель на расшифрованную битовую последовательность
-//result - указатель на кодовую посылку
-//valid - указатель на карту достоверности кодовой посылки
+// Creates a code message
+// code - pointer to the decrypted bit sequence
+// result - a pointer to a code message
+// valid - pointer to the validity map of the code message
+//
+// Создаёт кодовую посылку
+// code - указатель на расшифрованную битовую последовательность
+// result - указатель на кодовую посылку
+// valid - указатель на карту достоверности кодовой посылки
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int Oregon_NR::get_info_data(byte* code, byte* result, byte* valid) {
 
   byte* rd = result;
   byte* vd = valid;
+  // Clean up the arrays
   //Чистим массивы
+#if 0
   for (int l = 0; l < packet_length; l++) {
     *vd = 0;
     *rd = 0;
@@ -1281,22 +1301,32 @@ int Oregon_NR::get_info_data(byte* code, byte* result, byte* valid) {
   }
   rd = result;
   vd = valid;
+#else
+  for (int l = 0; l < packet_length; l++) {
+    vd[l] = 0;
+    rd[l] = 0;
+  }
+#endif
 
   int csm;
   for (csm = 0; csm < 30; csm++) {
-    if ( !consist_synchro && (*code < 128 && *(code + 1) > 128 && *(code + 2) < 128 && *(code + 3) > 128)) break; //Найдена последовательность 0101
+    if ( !consist_synchro && (*code < 128 && *(code + 1) > 128 && *(code + 2) < 128 && *(code + 3) > 128)) break; // Sequence 0101 found - Найдена последовательность 0101
     if (  consist_synchro && (*code < 127 && *(code + 1) > 129 && *(code + 2) < 127 && *(code + 3) > 129)) break;
     code++;
   }
+  // Synchronous in the first 20 bits was not found, such a packet cannot be decrypted in the second version of the protocol!
   // Синхронибл в первых 20 битах не найден, такой пакет не расшифруешь во второй версии протокола!
   //  if (ver == 2 && csm > 22) return 0;
+  // For the third version of the protocol, the number is different
   // ДЛя третьей версии протокола цифра иная
   //  if (ver == 3 && csm > 30) return 0;
-  //Переходим на начало считывания
+  // Go to the beginning of reading
+  // Переходим на начало считывания
   code += 4;
   int ii = 0;
   for (int i = 0; i < no_read_bits - csm; i++)
   {
+    // Not to go out of bounds
     // Чтобы не выйти за пределы
     if (i >= packet_length * 4 || (ver == 2 && i > result_size / 2 - csm - 4) || (ver == 3 && i > result_size - csm - 4)) break;
 
@@ -1728,7 +1758,7 @@ bool Oregon_NR::check_oregon_crcsum(byte* oregon_data, byte CCIT_POLY, byte CCIT
 
   recived_cksum = *pp + *(pp + 1) * 0x10;
   recived_crc = *(pp + 2) + *(pp + 3) * 0x10;
-  yield();
+  YIELD();
   return (recived_crc == crc && recived_cksum == cksum) ? 1 : 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1899,4 +1929,67 @@ float Oregon_NR::get_thp_humidity(byte* current_data) {
 
   return (float)(current_data[6] * 0x0100 + current_data[7] * 0x0010  + current_data[8] * 0x0001) / 10;
 }
+#endif
+#if 0
+/*
+    Addendum to support Ambient Weather Module
+
+    Manchester coding is used at the physical layer by this sensor.
+    Clock rate is 1024Hz within a very small window of variation.
+
+    The preamble contains a total of 13 bits; the first 11 are ones, followed by
+    a 01 sequence.
+
+    The next bit begins the data frame. Each data frame is six bytes.
+
+    The entire message including preamble is sent three times with no delay
+    between repetitions.
+
+    All data is sent bigendian order, bits and bytes.
+
+    Because the preamble is 13 bits, each successive message repetition is
+    shifted one bit relative to byte or nibble boundaries.
+    Extracting the repeated messages therefore requires a one or two-bit shift
+    for the 2nd and 3rd copies respectively.
+
+*/
+
+// Hash calculation https://eclecticmusingsofachaoticmind.wordpress.com/2015/01/21/home-automation-temperature-sensors/
+
+uint8_t  hashLFSR(int length, uint8_t *buff)
+{
+    uint8_t mask = 0x7C;
+    uint8_t checksum = 0x64;
+    uint8_t data;
+    int byteCnt;
+
+    for ( byteCnt=0; byteCnt < length; byteCnt++)
+    {
+        int bitCnt;
+        data = buff[byteCnt];
+
+        for ( bitCnt= 7; bitCnt >= 0 ; bitCnt-- )
+        {
+            uint8_t bit;
+
+            // Rotate mask right
+            bit = mask & 1;
+            mask = (mask >> 1 ) | (mask << 7);
+            if ( bit )
+            {
+                mask ^= 0x18;
+            }
+
+            // XOR mask into checksum if data bit is 1
+            if ( data & 0x80 )
+            {
+                checksum ^= mask;
+            }
+            data <<= 1;
+        }
+    }
+    return checksum;
+}
+
+
 #endif

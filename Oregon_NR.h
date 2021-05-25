@@ -128,6 +128,7 @@ class Oregon_NR
     bool is_assemble = IS_ASSEMBLE;
     bool no_memory = false;
 
+    // Sensor data
     //Данные датчика
     word sens_type;               // Sensor type
 

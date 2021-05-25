@@ -33,7 +33,7 @@ void setup() {
 
 void loop() {
   (void)RECEIVER_PIN;
-  
+
   //////////////////////////////////////////////////////////////////////
   // Capture the package, //////////////////////////////////////////////
   oregon.capture(0); // 1 - output service information to Serial
@@ -249,5 +249,5 @@ void loop() {
     Serial.println();
   }
 
-  yield();
+  // yield();
 }
